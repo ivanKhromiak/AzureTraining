@@ -1,6 +1,12 @@
-﻿using System.Linq;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Ardalis.GuardClauses;
+using Azure.Messaging.ServiceBus;
 using Microsoft.eShopWeb.ApplicationCore.Entities;
 using Microsoft.eShopWeb.ApplicationCore.Entities.BasketAggregate;
 using Microsoft.eShopWeb.ApplicationCore.Entities.OrderAggregate;
@@ -49,5 +55,36 @@ public class OrderService : IOrderService
         var order = new Order(basket.BuyerId, shippingAddress, items);
 
         await _orderRepository.AddAsync(order);
+    }
+
+    public async Task DeliverOrder(dynamic order)
+    {
+        var json = JsonSerializer.Serialize(order);
+        var data = new StringContent(json, Encoding.UTF8, "application/json");
+        var url = Environment.GetEnvironmentVariable("DeliveryOrderFunctionUrl");
+        using var client = new HttpClient();
+        var response = await client.PostAsync(url, data);
+    }
+
+    public async Task ReserveOrder(Dictionary<string, int> order)
+    {
+        const string queueName = "orderqueue";
+        var connectionString = Environment.GetEnvironmentVariable("ServiveBusConnectionString");
+        await using var client = new ServiceBusClient(connectionString);
+        await using ServiceBusSender sender = client.CreateSender(queueName);
+        try
+        {
+            var message = new ServiceBusMessage(order.ToJson());
+            await sender.SendMessageAsync(message);
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine($"{DateTime.Now} :: Exception {exception.Message}");
+        }
+        finally
+        {
+            await sender.DisposeAsync();
+            await client.DisposeAsync();
+        }
     }
 }
